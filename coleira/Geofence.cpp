@@ -5,14 +5,6 @@
 #include "Geofence.h"
 #include <math.h>
 
-static double haversineMeters(double lat1, double lon1, double lat2, double lon2) {
-  constexpr double R = 6371000.0;
-  const double dLat = (lat2 - lat1) * DEG_TO_RAD;
-  const double dLon = (lon2 - lon1) * DEG_TO_RAD;
-  const double a = sin(dLat/2)*sin(dLat/2) + cos(lat1*DEG_TO_RAD)*cos(lat2*DEG_TO_RAD)*sin(dLon/2)*sin(dLon/2);
-  return 2*R*atan2(sqrt(a), sqrt(1-a));
-}
-
 bool Geofence::isInside(const GpsData& gps) const {
   if (!gps.valid || fence_.count < 3) return false;
   bool c = false;
@@ -28,9 +20,27 @@ bool Geofence::isInside(const GpsData& gps) const {
 }
 
 double Geofence::distanceToSegmentMeters(double lat, double lon, const GeoPoint& a, const GeoPoint& b) const {
-  const double da = haversineMeters(lat, lon, a.lat, a.lon);
-  const double db = haversineMeters(lat, lon, b.lat, b.lon);
-  return da < db ? da : db;
+  // Distance from the point to the closest point of segment a-b, not to its endpoints.
+  // Local equirectangular frame centred on the point: accurate for fence-sized edges.
+  constexpr double R = 6371000.0;
+  const double mPerDegLat = R * DEG_TO_RAD;
+  const double mPerDegLon = mPerDegLat * cos(lat * DEG_TO_RAD);
+  const double ax = (a.lon - lon) * mPerDegLon;
+  const double ay = (a.lat - lat) * mPerDegLat;
+  const double bx = (b.lon - lon) * mPerDegLon;
+  const double by = (b.lat - lat) * mPerDegLat;
+  const double dx = bx - ax;
+  const double dy = by - ay;
+  const double len2 = dx * dx + dy * dy;
+  double t = 0.0;
+  if (len2 > 0.0) {
+    t = -(ax * dx + ay * dy) / len2;
+    if (t < 0.0) t = 0.0;
+    if (t > 1.0) t = 1.0;
+  }
+  const double cx = ax + t * dx;
+  const double cy = ay + t * dy;
+  return sqrt(cx * cx + cy * cy);
 }
 
 bool Geofence::isNearBoundary(const GpsData& gps, float warningMeters) const {
